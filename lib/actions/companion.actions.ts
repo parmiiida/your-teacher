@@ -74,17 +74,18 @@ export const addToSessionHistory = async (companionId: string) => {
   return data;
 };
 
-export const getRecentSessions = async (limit = 10) => {
+export const getRecentSessions = async (limit = 10): Promise<Companion[]> => {
   const supabase = createSupabaseClient();
   const { data, error } = await supabase
     .from("session_history")
     .select(`companions:companion_id (*)`)
+    // .eq('user_id', userId)
     .order("created_at", { ascending: false })
     .limit(limit);
 
   if (error) throw new Error(error.message);
 
-  return data.map(({ companions }) => companions);
+  return data.map(({ companions }) => companions as unknown as Companion);
 };
 
 export const getUserSessions = async (userId: string, limit = 10) => {
@@ -153,6 +154,10 @@ export const addBookmark = async (companionId: string, path: string) => {
     user_id: userId,
   });
   if (error) {
+    const message = (error.message || "").toLowerCase();
+    if (message.includes("bookmarks") || message.includes("relation") || message.includes("table")) {
+      return;
+    }
     throw new Error(error.message);
   }
   // Revalidate the path to force a re-render of the page
@@ -171,6 +176,10 @@ export const removeBookmark = async (companionId: string, path: string) => {
     .eq("companion_id", companionId)
     .eq("user_id", userId);
   if (error) {
+    const message = (error.message || "").toLowerCase();
+    if (message.includes("bookmarks") || message.includes("relation") || message.includes("table")) {
+      return;
+    }
     throw new Error(error.message);
   }
   revalidatePath(path);
@@ -185,8 +194,13 @@ export const getBookmarkedCompanions = async (userId: string) => {
     .select(`companions:companion_id (*)`) // Notice the (*) to get all the companion data
     .eq("user_id", userId);
   if (error) {
+    // If the bookmarks table doesn't exist (e.g., local dev without migration), fail soft
+    const message = (error.message || "").toLowerCase();
+    if (message.includes("bookmarks") || message.includes("relation") || message.includes("table")) {
+      return [] as Companion[];
+    }
     throw new Error(error.message);
   }
   // We don't need the bookmarks data, so we return only the companions
-  return data.map(({ companions }) => companions);
+  return (data || []).map(({ companions }) => companions);
 };

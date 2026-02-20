@@ -6,6 +6,7 @@ import {vapi} from "@/lib/vapi.sdk";
 import Image from "next/image";
 import Lottie, {LottieRefCurrentProps} from "lottie-react";
 import soundwaves from '@/constants/soundwaves.json'
+import { Clipboard, Check } from 'lucide-react';
 import {addToSessionHistory} from "@/lib/actions/companion.actions";
 
 enum CallStatus {
@@ -20,8 +21,12 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [messages, setMessages] = useState<SavedMessage[]>([]);
+    const [liveTranscript, setLiveTranscript] = useState<{ role: "user" | "assistant"; content: string } | null>(null);
+    const [micError, setMicError] = useState<string | null>(null);
+    const [copied, setCopied] = useState(false);
 
     const lottieRef = useRef<LottieRefCurrentProps>(null);
+    const transcriptEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
         if(lottieRef) {
@@ -34,24 +39,51 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
     }, [isSpeaking, lottieRef])
 
     useEffect(() => {
-        const onCallStart = () => setCallStatus(CallStatus.ACTIVE);
+        const onCallStart = () => {
+            setCallStatus(CallStatus.ACTIVE);
+            setMicError(null);
+            try {
+                setIsMuted(vapi.isMuted());
+            } catch {
+                setIsMuted(false);
+            }
+        };
 
         const onCallEnd = () => {
             setCallStatus(CallStatus.FINISHED);
-            addToSessionHistory(companionId)
-        }
+            setLiveTranscript(null);
+            addToSessionHistory(companionId);
+        };
+
+        const endCallCleanly = () => {
+            setCallStatus(CallStatus.FINISHED);
+            addToSessionHistory(companionId);
+        };
 
         const onMessage = (message: Message) => {
-            if(message.type === 'transcript' && message.transcriptType === 'final') {
-                const newMessage= { role: message.role, content: message.transcript}
-                setMessages((prev) => [newMessage, ...prev])
+            if (message.type !== "transcript" || !message.transcript) return;
+            const role = message.role === "user" || message.role === "assistant" ? message.role : "user";
+            const content = message.transcript.trim();
+            if (message.transcriptType === "partial") {
+                setLiveTranscript(content ? { role, content } : null);
+            } else {
+                if (content) setMessages((prev) => [...prev, { role, content }]);
+                setLiveTranscript(null);
             }
         }
 
         const onSpeechStart = () => setIsSpeaking(true);
         const onSpeechEnd = () => setIsSpeaking(false);
 
-        const onError = (error: Error) => console.log('Error', error);
+        const onError = (error: Error) => {
+            const msg = error?.message ?? String(error);
+            const isCallEnded = /ejection|Meeting has ended|call ended|disconnect/i.test(msg);
+            if (isCallEnded) {
+                endCallCleanly();
+                return;
+            }
+            console.warn('Vapi:', msg);
+        };
 
         vapi.on('call-start', onCallStart);
         vapi.on('call-end', onCallEnd);
@@ -61,32 +93,62 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
         vapi.on('speech-end', onSpeechEnd);
 
         return () => {
-            vapi.off('call-start', onCallStart);
-            vapi.off('call-end', onCallEnd);
-            vapi.off('message', onMessage);
-            vapi.off('error', onError);
-            vapi.off('speech-start', onSpeechStart);
-            vapi.off('speech-end', onSpeechEnd);
-        }
+            vapi.off("call-start", onCallStart);
+            vapi.off("call-end", onCallEnd);
+            vapi.off("message", onMessage);
+            vapi.off("error", onError);
+            vapi.off("speech-start", onSpeechStart);
+            vapi.off("speech-end", onSpeechEnd);
+        };
     }, []);
 
+    useEffect(() => {
+        transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages, liveTranscript]);
+
     const toggleMicrophone = () => {
-        const isMuted = vapi.isMuted();
-        vapi.setMuted(!isMuted);
-        setIsMuted(!isMuted)
+        try {
+            const currentlyMuted = vapi.isMuted();
+            vapi.setMuted(!currentlyMuted);
+            setIsMuted(!currentlyMuted);
+            setMicError(null);
+        } catch {
+            setMicError("Mikrofon şu an kullanılamıyor. Bağlantı kurulduktan sonra tekrar deneyin.");
+        }
     }
 
     const handleCall = async () => {
-        setCallStatus(CallStatus.CONNECTING)
+        setMicError(null);
+        setCallStatus(CallStatus.CONNECTING);
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            stream.getTracks().forEach((t) => t.stop());
+        } catch (err) {
+            setCallStatus(CallStatus.INACTIVE);
+            setMicError("Turn on the microphone to start the session.");
+            return;
+        }
 
         const assistantOverrides = {
             variableValues: { subject, topic, style },
             clientMessages: ["transcript"],
             serverMessages: [],
-        }
+        };
 
-        // @ts-expect-error
-        vapi.start(configureAssistant(voice, style), assistantOverrides)
+        try {
+            // @ts-expect-error
+            await vapi.start(configureAssistant(voice, style), assistantOverrides);
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (/ejection|Meeting has ended|call ended/i.test(msg)) {
+                setCallStatus(CallStatus.FINISHED);
+                addToSessionHistory(companionId);
+            } else {
+                setCallStatus(CallStatus.INACTIVE);
+                console.warn("Vapi start:", msg);
+            }
+        }
     }
 
     const handleDisconnect = () => {
@@ -94,9 +156,32 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
         vapi.stop()
     }
 
+    const copyConversation = async () => {
+        const assistantName = name.split(" ")[0].replace(/[.,]/g, "");
+        const lines = messages.map((m) =>
+            m.role === "assistant" ? `${assistantName}: ${m.content}` : `${userName}: ${m.content}`
+        );
+        if (liveTranscript?.content) {
+            lines.push(
+                liveTranscript.role === "assistant"
+                    ? `${assistantName}: ${liveTranscript.content}`
+                    : `${userName}: ${liveTranscript.content}`
+            );
+        }
+        const text = lines.join("\n");
+        if (!text) return;
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            setCopied(false);
+        }
+    }
+
     return (
-        <section className="flex flex-col h-[70vh]">
-            <section className="flex gap-8 max-sm:flex-col">
+        <section className="flex flex-col h-[85vh] min-h-0">
+            <section className="flex shrink-0 gap-6 max-sm:flex-col max-sm:gap-4">
                 <div className="companion-section">
                     <div className="companion-avatar" style={{ backgroundColor: getSubjectColor(subject)}}>
                         <div
@@ -127,6 +212,9 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
                             {userName}
                         </p>
                     </div>
+                    {micError && (
+                        <p className="text-amber-600 dark:text-amber-400 text-sm mb-2" role="alert">{micError}</p>
+                    )}
                     <button className="btn-mic" onClick={toggleMicrophone} disabled={callStatus !== CallStatus.ACTIVE}>
                         <Image src={isMuted ? '/icons/mic-off.svg' : '/icons/mic-on.svg'} alt="mic" width={36} height={36} />
                         <p className="max-sm:hidden">
@@ -144,8 +232,22 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
                 </div>
             </section>
 
-            <section className="transcript">
-                <div className="transcript-message no-scrollbar">
+            <section className="transcript max-h-[420px] sm:min-h-[200px] border border-gray-300 rounded-lg p-5 flex flex-col flex-1 min-h-0 w-full my-4">
+                <div className="flex justify-between items-center w-full mb-2 shrink-0">
+                    <h3 className="text-lg font-semibold text-left">Conversation</h3>
+                    <button
+                        type="button"
+                        onClick={copyConversation}
+                        disabled={messages.length === 0 && !liveTranscript?.content}
+                        className="shrink-0 p-2 rounded-lg hover:bg-muted transition-colors disabled:opacity-50 disabled:pointer-events-none"
+                        title="Copy conversation"
+                        aria-label="Copy conversation to clipboard"
+                    >
+                        {copied ? <Check className="w-4 h-4 text-green-600" /> : <Clipboard className="w-4 h-4" />}
+                    </button>
+                </div>
+
+                <div className="transcript-message no-scrollbar flex-1 min-h-0 overflow-y-auto">
                     {messages.map((message, index) => {
                         if(message.role === 'assistant') {
                             return (
@@ -163,6 +265,15 @@ const CompanionComponent = ({ companionId, subject, topic, name, userName, userI
                             </p>
                         }
                     })}
+                    {liveTranscript && (
+                        <p className="max-sm:text-sm text-muted-foreground italic">
+                            {liveTranscript.role === "assistant"
+                                ? `${name.split(" ")[0]}: ${liveTranscript.content}`
+                                : `${userName}: ${liveTranscript.content}`}
+                            <span className="inline-block w-2 h-4 ml-0.5 bg-current animate-pulse" aria-hidden />
+                        </p>
+                    )}
+                    <div ref={transcriptEndRef} />
                 </div>
 
                 <div className="transcript-fade" />

@@ -1,0 +1,44 @@
+// Prisma schema – Supabase yerine kendi veritabanı
+// Geliştirme: SQLite (dosya tabanlı). Production: DATABASE_URL ile PostgreSQL kullanabilirsiniz.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Companion {
+  id        String   @id @default(cuid())
+  author    String   // Clerk user id
+  name      String
+  subject   String
+  topic     String
+  voice     String
+  style     String
+  duration  Int      @default(15)
+  createdAt DateTime @default(now())
+
+  sessionHistory SessionHistory[]
+  bookmarks      Bookmark[]
+}
+
+model SessionHistory {
+  id          String   @id @default(cuid())
+  companionId String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  companion Companion @relation(fields: [companionId], references: [id], onDelete: Cascade)
+}
+
+model Bookmark {
+  id          String   @id @default(cuid())
+  companionId String
+  userId      String
+  createdAt   DateTime @default(now())
+
+  companion Companion @relation(fields: [companionId], references: [id], onDelete: Cascade)
+}

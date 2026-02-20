@@ -2,11 +2,19 @@
   "name": "your-teacher",
   "version": "0.1.0",
   "private": true,
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
   "scripts": {
     "dev": "next dev --turbopack",
-    "build": "next build",
+    "build": "npx prisma generate && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "postinstall": "npx prisma generate",
+    "setup": "npx prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "db:seed": "npx prisma db seed"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.31.1",
@@ -17,7 +25,7 @@
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.3",
     "@sentry/nextjs": "^10.5.0",
-    "@supabase/supabase-js": "^2.55.0",
+    "@prisma/client": "^6.9.0",
     "@vapi-ai/web": "^2.3.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -30,8 +38,9 @@
     "tailwind-merge": "^3.3.1",
     "zod": "^4.0.17"
   },
-  "devDependencies": {
-    "@eslint/eslintrc": "^3",
+"devDependencies": {
+  "prisma": "^6.9.0",
+  "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

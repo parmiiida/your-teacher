@@ -17,11 +17,15 @@ enum Subject {
   business = "business",
 }
 
-type Companion = Models.DocumentList<Models.Document> & {
-  $id: string;
+// Prisma / kendi veritabanı ile uyumlu tip (Supabase/Appwrite kaldırıldı)
+type Companion = {
+  id: string;
+  $id?: string; // geri uyumluluk
   name: string;
-  subject: Subject;
+  subject: string;
   topic: string;
+  voice?: string;
+  style?: string;
   duration: number;
   bookmarked: boolean;
 };

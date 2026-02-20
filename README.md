@@ -1,3 +1,23 @@
+# your-teacher
+
+## Veritabanı (Prisma)
+
+Proje **kendi veritabanını** kullanıyor: Prisma + SQLite.
+
+1. **Bağımlılıkları yükle:** `npm install`
+2. **Prisma client oluştur:** `npm run setup` (veya `npx prisma generate`) — **"Can't resolve '@prisma/client'"** hatası alıyorsan mutlaka çalıştır.
+3. **`.env.local`** içine ekle: `DATABASE_URL="file:./dev.db"`
+4. **İlk migration:** `npx prisma migrate dev --name init`
+5. Uygulamayı çalıştır: `npm run dev`
+
+- Veritabanı dosyası: `prisma/dev.db` (SQLite)
+- Şemayı değiştirirsen: `npx prisma migrate dev --name <açıklama>`
+- Görsel yönetim: `npx prisma studio`
+
+Production’da PostgreSQL kullanmak için `DATABASE_URL`’i PostgreSQL connection string ile değiştirip `prisma/schema.prisma` içinde `provider = "postgresql"` yapıp tekrar migrate edebilirsin.
+
+---
+
 # Add Clerk to Next.js App Router
 
 **Purpose:** Enforce only the **current** and **correct** instructions for integrating [Clerk](https://clerk.com/) into a Next.js (App Router) application.
